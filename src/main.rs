@@ -48,7 +48,7 @@ fn main() {
 
 fn cmd_show(ctx: Context) -> Result<(), git2::Error> {
     println!(
-        "{}State:{}\t {:?}",
+        "{}State:{}   {:?}",
         color::Fg(color::Green),
         color::Fg(color::Reset),
         ctx.repo.state(),
@@ -62,21 +62,21 @@ fn cmd_show(ctx: Context) -> Result<(), git2::Error> {
         .map(|r| r.unwrap().to_string())
         .collect();
     println!(
-        "{}Remotes:{}\t{}",
+        "{}Remotes:{} {}",
         color::Fg(color::Green),
         color::Fg(color::Reset),
         remotes.join(",")
     );
 
-    let mut revwalk = ctx.repo.revwalk()?;
-
     // Prepare the revwalk
+    let mut revwalk = ctx.repo.revwalk()?;
     revwalk.set_sorting(git2::Sort::NONE | git2::Sort::TIME)?;
     revwalk.push_head()?;
 
+    // lookup commits from Oids
     let revwalk = revwalk.filter_map(|id| {
         let id = if let Ok(id) = id { id } else { return None };
-        let commit = ctx.repo.find_commit(id).map_err(|e| Some(e));
+        let commit = ctx.repo.find_commit(id).map_err(Some);
         Some(commit)
     });
 
@@ -84,8 +84,10 @@ fn cmd_show(ctx: Context) -> Result<(), git2::Error> {
     for commit in revwalk {
         if let Ok(commit) = commit {
             println!(
-                "{} {}",
-                commit.id(),
+                "{}{:}{} {}",
+                color::Fg(color::Yellow),
+                &commit.id().to_string()[..7],
+                color::Fg(color::Reset),
                 String::from_utf8_lossy(commit.message_bytes())
                     .lines()
                     .next()
