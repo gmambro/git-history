@@ -1,0 +1,10 @@
+[package]
+name = "git-history"
+version = "0.1.0"
+edition = "2018"
+
+
+[dependencies]
+git2 = "0.13"
+structopt = "0.3"
+termion = "1.5"
