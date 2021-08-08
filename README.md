@@ -1,2 +1,3 @@
-# git-history
-Tools to help visualising and showing the git history
+# git-squirrel
+
+Helps you leap and land on git branches without falling.
