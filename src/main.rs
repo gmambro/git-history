@@ -1,3 +1,4 @@
+use derivative::Derivative;
 use git2::Repository;
 use std::env;
 use structopt::StructOpt;
@@ -5,13 +6,9 @@ use termion::color;
 
 #[derive(StructOpt, Debug)]
 struct Opts {
-    // The name of the remote
+    // The name of the branch to compare against
     #[structopt(long)]
-    remote: Option<String>,
-
-    // The name of the default branch (e.g. main or master)
-    #[structopt(long)]
-    default_branch: Option<String>,
+    origin_branch: Option<String>,
 
     #[structopt(subcommand)]
     // Note that we mark a field as a subcommand
@@ -25,8 +22,12 @@ enum Command {
     Next,
 }
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 struct Context {
+    #[derivative(Debug = "ignore")]
     repo: Repository,
+    origin_branch: String,
 }
 
 fn main() {
@@ -38,7 +39,13 @@ fn main() {
         Err(e) => panic!("No git repo found at {:?}: {}", path, e),
     };
 
-    let ctx = Context { repo };
+    let origin_branch = opts
+        .origin_branch
+        .unwrap_or_else(|| guess_origin_branch(&repo).expect("Cannot find reference branch"));
+    let ctx = Context {
+        repo,
+        origin_branch,
+    };
 
     match opts.cmd.unwrap_or(Command::Show) {
         Command::Show => cmd_show(ctx).unwrap(),
@@ -54,24 +61,21 @@ fn cmd_show(ctx: Context) -> Result<(), git2::Error> {
         ctx.repo.state(),
     );
 
-    let remotes: Vec<String> = ctx
-        .repo
-        .remotes()
-        .unwrap()
-        .iter()
-        .map(|r| r.unwrap().to_string())
-        .collect();
-    println!(
-        "{}Remotes:{} {}",
-        color::Fg(color::Green),
-        color::Fg(color::Reset),
-        remotes.join(",")
-    );
+    print_status(&ctx);
 
     // Prepare the revwalk
     let mut revwalk = ctx.repo.revwalk()?;
     revwalk.set_sorting(git2::Sort::NONE | git2::Sort::TIME)?;
-    revwalk.push_head()?;
+
+    let start_revspec = ctx.repo.revparse_single(&ctx.origin_branch)?;
+    revwalk.hide(start_revspec.id())?;
+    revwalk.push(
+        ctx.repo
+            .head()?
+            .resolve()?
+            .target()
+            .expect("Resolved target should always get a valid Oid"),
+    )?;
 
     // lookup commits from Oids
     let revwalk = revwalk.filter_map(|id| {
@@ -99,4 +103,42 @@ fn cmd_show(ctx: Context) -> Result<(), git2::Error> {
     }
 
     Ok(())
+}
+
+fn guess_origin_branch(repo: &Repository) -> Result<String, git2::Error> {
+    for remote in &["origin", "upstream"] {
+        let reference = repo.find_reference(&format!("refs/remotes/{}/HEAD", remote));
+        if let Ok(reference) = reference {
+            return Ok(reference
+                .shorthand()
+                .expect("Cannot get a valid shorthand")
+                .into());
+        }
+    }
+
+    for head in &["master", "main"] {
+        if repo.find_reference(&format!("refs/heads/{}", head)).is_ok() {
+            return Ok(head.to_string());
+        }
+    }
+
+    // TODO find a better way to give up
+    Ok("master".into())
+}
+
+fn print_status(ctx: &Context) {
+    let head = match ctx.repo.head() {
+        Ok(head) => Some(head),
+        Err(ref e)
+            if e.code() == git2::ErrorCode::UnbornBranch
+                || e.code() == git2::ErrorCode::NotFound =>
+        {
+            None
+        }
+        Err(_) => {
+            return;
+        }
+    };
+    let head = head.as_ref().and_then(|h| h.shorthand());
+    println!("On {}", head.unwrap_or("HEAD"));
 }
